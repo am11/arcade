@@ -47,7 +47,7 @@ namespace Microsoft.DotNet.XUnitExtensions
                     }
                 }
 
-                if (DiscovererHelpers.TestPlatformApplies(testPlatforms) && RuntimeConfigurationApplies(runtimeConfigurations) && StressModeApplies(stressMode))
+                if (DiscovererHelpers.TestPlatformApplies(testPlatforms) || RuntimeConfigurationApplies(runtimeConfigurations) || StressModeApplies(stressMode))
                 {
                     return new[] { new KeyValuePair<string, string>(XunitConstants.Category, XunitConstants.Failing) };
                 }
