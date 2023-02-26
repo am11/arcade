@@ -55,7 +55,7 @@ __AlpinePackages+=" gettext-dev"
 __AlpinePackages+=" icu-dev"
 __AlpinePackages+=" libunwind-dev"
 __AlpinePackages+=" lttng-ust-dev"
-__AlpinePackages+=" compiler-rt-static"
+__AlpinePackages+=" compiler-rt"
 __AlpinePackages+=" numactl-dev"
 
 # runtime libraries' dependencies
@@ -150,7 +150,6 @@ while :; do
             __BuildArch=riscv64
             __AlpineArch=riscv64
             __AlpinePackages="${__AlpinePackages// lldb-dev/}"
-            __AlpinePackages="${__AlpinePackages// compiler-rt-static/}"
             __QEMUArch=riscv64
             __UbuntuArch=riscv64
             __UbuntuRepo="http://deb.debian.org/debian-ports"
@@ -177,7 +176,7 @@ while :; do
             unset __LLDB_Package
 
             if [[ "$version" != "edge" && ( -z "$__AlpineVersion" || -z "$__AlpineMajorVersion" )]]; then
-                __AlpineVersion=3.15 # minimum version that supports compiler-rt
+                __AlpineVersion=3.15 # minimum version that supports lldb-dev
             fi
             ;;
         s390x)
@@ -192,7 +191,7 @@ while :; do
             unset __LLDB_Package
 
             if [[ "$version" != "edge" && ( -z "$__AlpineVersion" || -z "$__AlpineMajorVersion" )]]; then
-                __AlpineVersion=3.15 # minimum version that supports compiler-rt
+                __AlpineVersion=3.15 # minimum version that supports lldb-dev
             fi
             ;;
         x64)
@@ -206,6 +205,7 @@ while :; do
         x86)
             __BuildArch=x86
             __UbuntuArch=i386
+            __AlpineArch=x86
             __UbuntuRepo="http://archive.ubuntu.com/ubuntu/"
             ;;
         lldb*)
@@ -325,13 +325,17 @@ while :; do
                 edge) __AlpineLlvmLibsLookup=1 ;;
                 *)
                     if [[ "$__AlpineArch" =~ "s390x|ppc64le" ]]; then
-                        __AlpineVersion=3.15 # minimum version that supports compiler-rt
+                        __AlpineVersion=3.15 # minimum version that supports lldb-dev
                         __AlpinePackages+=" llvm12-libs"
+                    elif [[ "$__AlpineArch" == "x86" ]]; then
+                        __AlpineVersion=3.17 # minimum version that supports lldb-dev
+                        __AlpinePackages+=" llvm15-libs"
                     elif [[ "$__AlpineArch" == "riscv64" ]]; then
                         __AlpineLlvmLibsLookup=1
                         __AlpineVersion=edge # minimum version with APKINDEX.tar.gz (packages archive)
                     else
                         __AlpineVersion=3.13 # 3.13 to maximize compatibility
+                        __AlpinePackages+=" llvm10-libs"
                     fi
             esac
             ;;
