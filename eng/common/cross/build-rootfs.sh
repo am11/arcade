@@ -5,7 +5,7 @@ set -e
 usage()
 {
     echo "Usage: $0 [BuildArch] [CodeName] [lldbx.y] [llvmx[.y]] [--skipunmount] --rootfsdir <directory>]"
-    echo "BuildArch can be: arm(default), arm64, armel, armv6, ppc64le, riscv64, s390x, x64, x86"
+    echo "BuildArch can be: arm(default), arm64, armel, armv6, loongarch64, ppc64le, riscv64, s390x, x64, x86"
     echo "CodeName - optional, Code name for Linux, can be: xenial(default), zesty, bionic, alpine"
     echo "                               for alpine can be specified with version: alpineX.YY or alpineedge"
     echo "                               for FreeBSD can be: freebsd13, freebsd14"
@@ -15,6 +15,7 @@ usage()
     echo "llvmx[.y] - optional, LLVM version for LLVM related packages."
     echo "--skipunmount - optional, will skip the unmount of rootfs folder."
     echo "--skipsigcheck - optional, will skip package signature checks (allowing untrusted packages)."
+    echo "--skipemulation - optional, will skip qemu and debootstrap requirement when building environment for debian based systems."
     echo "--use-mirror - optional, use mirror URL to fetch resources, when available."
     echo "--jobs N - optional, restrict to N jobs."
     exit 1
@@ -32,6 +33,7 @@ __QEMUArch=arm
 __UbuntuArch=armhf
 __UbuntuRepo=
 __UbuntuSuites="updates security backports"
+__DebianSuites=
 __LLDB_Package="liblldb-3.9-dev"
 __SkipUnmount=0
 
@@ -177,6 +179,19 @@ while :; do
 
             if [[ -e "$__KeyringFile" ]]; then
                 __Keyring="--keyring $__KeyringFile"
+            fi
+            ;;
+        loongarch64)
+            __BuildArch=loongarch64
+            __AlpineArch=loongarch64
+            __QEMUArch=loongarch64
+            __UbuntuArch=loong64
+            __UbuntuSuites=
+            __DebianSuites=unreleased
+            __LLDB_Package="liblldb-19-dev"
+
+            if [[ "$__CodeName" == "sid" ]]; then
+                __UbuntuRepo="http://ftp.ports.debian.org/debian-ports/"
             fi
             ;;
         riscv64)
@@ -339,10 +354,28 @@ while :; do
             ;;
         sid) # Debian sid
             __CodeName=sid
-            __KeyringFile="/usr/share/keyrings/debian-archive-keyring.gpg"
+            __UbuntuSuites=
 
-            if [[ -z "$__UbuntuRepo" ]]; then
-                __UbuntuRepo="http://ftp.debian.org/debian/"
+            # Debian-Ports architectures need different values
+            case "$__UbuntuArch" in
+            amd64|arm64|armel|armhf|i386|mips64el|ppc64el|riscv64|s390x)
+                __KeyringFile="/usr/share/keyrings/debian-archive-keyring.gpg"
+
+                if [[ -z "$__UbuntuRepo" ]]; then
+                    __UbuntuRepo="http://ftp.debian.org/debian/"
+                fi
+                ;;
+            *)
+                __KeyringFile="/usr/share/keyrings/debian-ports-archive-keyring.gpg"
+
+                if [[ -z "$__UbuntuRepo" ]]; then
+                    __UbuntuRepo="http://ftp.ports.debian.org/debian-ports/"
+                fi
+                ;;
+            esac
+
+            if [[ -e "$__KeyringFile" ]]; then
+                __Keyring="--keyring $__KeyringFile"
             fi
             ;;
         tizen)
@@ -387,6 +420,9 @@ while :; do
         --skipsigcheck)
             __SkipSigCheck=1
             ;;
+        --skipemulation)
+            __SkipEmulation=1
+            ;;
         --rootfsdir|-rootfsdir)
             shift
             __RootfsDir="$1"
@@ -419,9 +455,9 @@ case "$__AlpineVersion" in
         elif [[ "$__AlpineArch" == "x86" ]]; then
             __AlpineVersion=3.17 # minimum version that supports lldb-dev
             __AlpinePackages+=" llvm15-libs"
-        elif [[ "$__AlpineArch" == "riscv64" ]]; then
-            __AlpineLlvmLibsLookup=1
-            __AlpineVersion=edge # minimum version with APKINDEX.tar.gz (packages archive)
+        elif [[ "$__AlpineArch" == "riscv64" || "$__AlpineArch" == "loongarch64" ]]; then
+            __AlpineVersion=3.21 # minimum version that supports lldb-dev
+            __AlpinePackages+=" llvm19-libs"
         elif [[ -n "$__AlpineMajorVersion" ]]; then
             # use whichever alpine version is provided and select the latest toolchain libs
             __AlpineLlvmLibsLookup=1
@@ -482,6 +518,19 @@ ensureDownloadTool()
     fi
 }
 
+writeDeb822File()
+{
+    rm -rf "$__RootfsDir"/etc/apt/*.{sources,list} "$__RootfsDir"/etc/apt/sources.list.d
+    mkdir -p "$__RootfsDir/etc/apt/sources.list.d/"
+    cat > "$__RootfsDir/etc/apt/sources.list.d/$__CodeName.sources" <<EOF
+Types: deb
+URIs: $__UbuntuRepo
+Suites: $__CodeName $__DebianSuites $(echo $__UbuntuSuites | xargs -n 1 | xargs -I {} echo -n "$__CodeName-{} ")
+Components: main universe
+Signed-By: $__KeyringFile
+EOF
+}
+
 if [[ "$__CodeName" == "alpine" ]]; then
     __ApkToolsVersion=2.12.11
     __ApkToolsDir="$(mktemp -d)"
@@ -505,11 +554,6 @@ if [[ "$__CodeName" == "alpine" ]]; then
     echo "$__ApkToolsSHA512SUM $__ApkToolsDir/apk.static" | sha512sum -c
     chmod +x "$__ApkToolsDir/apk.static"
 
-    if [[ -f "/usr/bin/qemu-$__QEMUArch-static" ]]; then
-        mkdir -p "$__RootfsDir"/usr/bin
-        cp -v "/usr/bin/qemu-$__QEMUArch-static" "$__RootfsDir/usr/bin"
-    fi
-
     if [[ "$__AlpineVersion" == "edge" ]]; then
         version=edge
     else
@@ -527,6 +571,10 @@ if [[ "$__CodeName" == "alpine" ]]; then
         __ApkSignatureArg="--allow-untrusted"
     else
         __ApkSignatureArg="--keys-dir $__ApkKeysDir"
+    fi
+
+    if [[ "$__SkipEmulation" == "1" ]]; then
+        __NoEmulationArg="--no-scripts"
     fi
 
     # initialize DB
@@ -550,7 +598,7 @@ if [[ "$__CodeName" == "alpine" ]]; then
     "$__ApkToolsDir/apk.static" \
         -X "http://dl-cdn.alpinelinux.org/alpine/$version/main" \
         -X "http://dl-cdn.alpinelinux.org/alpine/$version/community" \
-        -U $__ApkSignatureArg --root "$__RootfsDir" --arch "$__AlpineArch" \
+        -U $__ApkSignatureArg --root "$__RootfsDir" --arch "$__AlpineArch" $__NoEmulationArg \
         add $__AlpinePackages
 
     rm -r "$__ApkToolsDir"
@@ -745,25 +793,53 @@ elif [[ "$__CodeName" == "haiku" ]]; then
     popd
     rm -rf "$__RootfsDir/tmp"
 elif [[ -n "$__CodeName" ]]; then
+    if [[ "$__SkipEmulation" == "1" ]]; then
+        if [[ -z "$AR" ]]; then
+            if command -v ar &>/dev/null; then
+                AR="$(command -v ar)"
+            elif command -v llvm-ar &>/dev/null; then
+                AR="$(command -v llvm-ar)"
+            else
+                >&2 echo "$__SkipEmulation Unable to find ar or llvm-ar on PATH, add them to PATH or set AR environment variable pointing to the available AR tool"
+                exit 1
+            fi
+        fi
 
+        suites="$__CodeName $__DebianSuites $(echo $__UbuntuSuites | xargs -n 1 | xargs -I {} echo -n "$__CodeName-{} ")"
+
+        PYTHON=${PYTHON_EXECUTABLE:-python3}
+        echo running "$PYTHON" "$__CrossDir/install-debs.py" --arch "$__UbuntuArch" --rootfsdir "$__RootfsDir" --artool "$AR" \
+            $(echo $suites | xargs -n 1 | xargs -I {} echo -n "--suite {} ") \
+            $__UbuntuPackages
+
+        "$PYTHON" "$__CrossDir/install-debs.py" --arch "$__UbuntuArch" --mirror "$__UbuntuRepo" --rootfsdir "$__RootfsDir" --artool "$AR" \
+            $(echo $suites | xargs -n 1 | xargs -I {} echo -n "--suite {} ") \
+            $__UbuntuPackages
+
+        writeDeb822File
+
+        exit 0
+    fi
+
+    __UpdateOptions=
     if [[ "$__SkipSigCheck" == "0" ]]; then
         __Keyring="$__Keyring --force-check-gpg"
+    else
+        __Keyring=
+        __UpdateOptions="--allow-unauthenticated --allow-insecure-repositories"
     fi
 
     # shellcheck disable=SC2086
-    echo running debootstrap "--variant=minbase" $__Keyring --arch "$__UbuntuArch" "$__CodeName" "$__RootfsDir" "$__UbuntuRepo"
-    debootstrap "--variant=minbase" $__Keyring --arch "$__UbuntuArch" "$__CodeName" "$__RootfsDir" "$__UbuntuRepo"
+    echo running debootstrap "--variant=minbase" --foreign $__Keyring --arch "$__UbuntuArch" "$__CodeName" "$__RootfsDir" "$__UbuntuRepo"
+    if ! debootstrap "--variant=minbase" $__Keyring --arch "$__UbuntuArch" "$__CodeName" "$__RootfsDir" "$__UbuntuRepo"; then
+        echo "debootstrap failed! dumping debootstrap.log"
+        cat "$__RootfsDir/debootstrap/debootstrap.log"
+        exit 1
+    fi
 
-    mkdir -p "$__RootfsDir/etc/apt/sources.list.d/"
-    cat > "$__RootfsDir/etc/apt/sources.list.d/$__CodeName.sources" <<EOF
-Types: deb
-URIs: $__UbuntuRepo
-Suites: $__CodeName $(echo $__UbuntuSuites | xargs -n 1 | xargs -I {} echo -n "$__CodeName-{} ")
-Components: main universe
-Signed-By: $__KeyringFile
-EOF
+    writeDeb822File
 
-    chroot "$__RootfsDir" apt-get update
+    chroot "$__RootfsDir" apt-get update $__UpdateOptions
     chroot "$__RootfsDir" apt-get -f -y install
     # shellcheck disable=SC2086
     chroot "$__RootfsDir" apt-get -y install $__UbuntuPackages
