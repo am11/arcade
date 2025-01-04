@@ -782,6 +782,14 @@ elif [[ "$__CodeName" == "haiku" ]]; then
     popd
     rm -rf "$__RootfsDir/tmp"
 elif [[ -n "$__CodeName" ]]; then
+    __UpdateOptions=
+    if [[ "$__SkipSigCheck" == "0" ]]; then
+        __Keyring="$__Keyring --force-check-gpg"
+    else
+        __Keyring=
+        __UpdateOptions="--allow-unauthenticated --allow-insecure-repositories"
+    fi
+
     if [[ "$__SkipEmulation" == "1" ]]; then
         if [[ -z "$AR" ]]; then
             if command -v ar &>/dev/null; then
@@ -797,10 +805,6 @@ elif [[ -n "$__CodeName" ]]; then
         # shellcheck disable=SC2086
         suites="$__CodeName $__DebianSuites $(echo $__UbuntuSuites | xargs -n 1 | xargs -I {} echo -n "$__CodeName-{} ")"
 
-        if [[ "$__SkipSigCheck" == "0" ]]; then
-            __Keyring="$__Keyring --force-check-sig"
-        fi
-
         PYTHON=${PYTHON_EXECUTABLE:-python3}
 
         # shellcheck disable=SC2086,SC2046
@@ -814,14 +818,6 @@ elif [[ -n "$__CodeName" ]]; then
             $__UbuntuPackages
 
         exit 0
-    fi
-
-    __UpdateOptions=
-    if [[ "$__SkipSigCheck" == "0" ]]; then
-        __Keyring="$__Keyring --force-check-gpg"
-    else
-        __Keyring=
-        __UpdateOptions="--allow-unauthenticated --allow-insecure-repositories"
     fi
 
     # shellcheck disable=SC2086
