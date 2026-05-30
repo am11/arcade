@@ -24,7 +24,7 @@ case "$os" in
             apt update
 
             apt install -y build-essential gettext locales cmake llvm clang lld lldb liblldb-dev libunwind8-dev libicu-dev liblttng-ust-dev \
-                libssl-dev libkrb5-dev pigz cpio ninja-build
+                libssl-dev libkrb5-dev pigz cpio ninja-build file
 
             localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
         elif [ "$ID" = "fedora" ] || [ "$ID" = "rhel" ] || [ "$ID" = "azurelinux" ] || [ "$ID" = "centos" ]; then
